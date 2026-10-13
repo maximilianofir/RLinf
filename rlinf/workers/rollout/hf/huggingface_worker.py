@@ -37,6 +37,7 @@ from rlinf.models import get_model
 from rlinf.models.embodiment.base_policy import BasePolicy
 from rlinf.scheduler import Channel, Cluster, Worker, split_channel_message
 from rlinf.utils.placement import HybridComponentPlacement
+from rlinf.utils.utils import seed_everything
 
 
 class MultiStepRolloutWorker(Worker):
@@ -189,6 +190,8 @@ class MultiStepRolloutWorker(Worker):
         self.setup_sample_params()
         if self.enable_offload:
             self.offload_model()
+        if (seed := self.cfg.rollout.get("seed")) is not None:
+            seed_everything(int(seed) + self._rank)
 
     def setup_sample_params(self):
         # sampling parameters for rollout
@@ -765,6 +768,9 @@ class MultiStepRolloutWorker(Worker):
     async def evaluate(self, input_channel: Channel, output_channel: Channel):
         if self.enable_offload:
             self.reload_model()
+        # Restart sampling after model reload for matched checkpoint comparisons.
+        if (seed := self.cfg.rollout.get("seed")) is not None:
+            seed_everything(int(seed) + self._rank)
         if self.env_decoupled_mode:
             while True:
                 (
