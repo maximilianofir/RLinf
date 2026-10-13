@@ -74,6 +74,12 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
         raise FileNotFoundError(f"Model path does not exist: {model_path}")
 
     config = Gr00tN1d7Config.from_pretrained(str(model_path))
+    config.load_bf16 = torch_dtype == torch.bfloat16
+    for name in (
+        "tune_llm", "tune_visual", "tune_projector", "tune_diffusion_model", "tune_vlln"
+    ):
+        if name in cfg:
+            setattr(config, name, cfg[name])
     _action_dim = cfg.get("action_dim")
     if _action_dim is not None:
         config.action_dim = _action_dim

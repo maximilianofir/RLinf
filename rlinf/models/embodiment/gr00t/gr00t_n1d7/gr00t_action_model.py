@@ -917,6 +917,13 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
     def forward(self, forward_type=ForwardType.DEFAULT, **kwargs):
         if forward_type == ForwardType.DEFAULT:
             return self.default_forward(**kwargs)
+        elif forward_type == ForwardType.SFT:
+            inputs, _ = kwargs["data"]
+            backbone_inputs, action_inputs = self.prepare_input(dict(inputs))
+            backbone_outputs = self.backbone(backbone_inputs)
+            return Gr00tN1d7ActionHead.forward(
+                self.action_head, backbone_outputs, action_inputs
+            )["loss"]
         else:
             raise NotImplementedError
 
@@ -1037,9 +1044,7 @@ class GR00T_N1_7_ForRLActionPrediction(Gr00tN1d7, BasePolicy):
     ) -> tuple[dict[str, Any], dict[str, Any], bool]:
         """Convert raw env observations into batched GR00T processor inputs."""
         env_obs = dict(env_obs)
-        # Here we have a source causing tiny inference-training inconsistency,
-        # force convert the state to bf16 then back to float32 to reproduce the info loss in training.
-        env_obs["states"] = env_obs["states"].to(torch.bfloat16)
+        # Normalize physical state in float32; PPO replays the cached model inputs.
         env_obs["states"] = env_obs["states"].cpu().float()
 
         observations = self.obs_convert_fn(env_obs)

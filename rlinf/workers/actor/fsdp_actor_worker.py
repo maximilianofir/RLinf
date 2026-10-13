@@ -1040,7 +1040,9 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         self.enable_offload = self.cfg.actor.get("enable_offload", False)
         self.entropy_op_type = self.cfg.algorithm.get("entropy_op_type", "torch")
 
-        self.enable_sft_co_train = cfg.actor.get("enable_sft_co_train", False)
+        self.enable_sft_co_train = cfg.actor.get(
+            "enable_sft_co_train", False
+        ) and cfg.actor.get("sft_loss_weight", 0.1) > 0
         self.version = 0
         if self.enable_sft_co_train:
             self._build_sft_data_loader()
@@ -1281,7 +1283,16 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
         return rollout_metrics
 
     def _build_sft_data_loader(self):
-        if SupportedModel(self.cfg.actor.model.model_type) in [SupportedModel.OPENPI]:
+        if SupportedModel(self.cfg.actor.model.model_type) == SupportedModel.GR00T_N1D7:
+            from rlinf.models.embodiment.gr00t.gr00t_n1d7.sft_data import (
+                create_data_loader,
+            )
+
+            self.data_loader = create_data_loader(self.cfg.actor)
+            self.sft_iterator = iter(self.data_loader)
+            self.train_epoch = 0
+            self.sft_loss_weight = self.cfg.actor.get("sft_loss_weight", 0.1)
+        elif SupportedModel(self.cfg.actor.model.model_type) in [SupportedModel.OPENPI]:
             repo_id = resolve_lerobot_repo_id(self.cfg.actor.get("sft_data_path"))
             if repo_id is None:
                 raise ValueError(
@@ -1328,7 +1339,10 @@ class EmbodiedFSDPActor(FSDPModelManager, Worker):
             observation, actions = next(self.sft_iterator)
         except StopIteration:
             self.train_epoch += 1
-            self.data_loader.set_epoch(self.train_epoch)
+            if SupportedModel(self.cfg.actor.model.model_type) == SupportedModel.GR00T_N1D7:
+                self.data_loader.sampler.set_epoch(self.train_epoch)
+            else:
+                self.data_loader.set_epoch(self.train_epoch)
             self.sft_iterator = iter(self.data_loader)
             observation, actions = next(self.sft_iterator)
 

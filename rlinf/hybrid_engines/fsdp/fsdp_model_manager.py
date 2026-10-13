@@ -23,7 +23,6 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.tensor import DTensor
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
-from transformers import AutoConfig, AutoModelForCausalLM, AutoModelForVision2Seq
 
 from rlinf.config import SupportedModel, torch_dtype_from_precision
 from rlinf.data.tokenizers import hf_tokenizer
@@ -139,6 +138,12 @@ class FSDPModelManager:
         Returns:
             model: the initialized model.
         """
+        from transformers import (
+            AutoConfig,
+            AutoModelForCausalLM,
+            AutoModelForVision2Seq,
+        )
+
         cfg = self._cfg
         use_gptq = cfg.model.get("gptq_model", False)
         load_in_8bit = cfg.model.get("load_in_8bit", False)
@@ -356,25 +361,27 @@ class FSDPModelManager:
         restore_weight_offload = self.is_weight_offloaded
         restore_optimizer_offload = self.is_optimizer_offloaded
 
-        if restore_weight_offload:
-            self.load_param_and_grad(self.device)
-        if restore_optimizer_offload:
-            self.load_optimizer(self.device)
-
-        self._strategy.save_checkpoint(
-            self.model,
-            self.optimizer,
-            self.lr_scheduler,
-            save_path,
-            save_full_model_weights=self._cfg.fsdp_config.get(
-                "save_full_model_weights", True
-            ),
-        )
-
-        if restore_weight_offload:
-            self.offload_param_and_grad()
-        if restore_optimizer_offload:
+        # DCP accepts CPU optimizer state; leave GPU memory for model gathering.
+        if not restore_optimizer_offload:
             self.offload_optimizer()
+        try:
+            if restore_weight_offload:
+                self.load_param_and_grad(self.device)
+
+            self._strategy.save_checkpoint(
+                self.model,
+                self.optimizer,
+                self.lr_scheduler,
+                save_path,
+                save_full_model_weights=self._cfg.fsdp_config.get(
+                    "save_full_model_weights", True
+                ),
+            )
+        finally:
+            if restore_weight_offload:
+                self.offload_param_and_grad()
+            if not restore_optimizer_offload:
+                self.load_optimizer(self.device)
 
     def offload_param_and_grad(self, offload_grad: bool = False) -> None:
         """
